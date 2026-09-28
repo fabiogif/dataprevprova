@@ -1027,13 +1027,9 @@ const LS = {
   get(k,def){try{const v=localStorage.getItem('dtp26_'+k);return v?JSON.parse(v):def}catch(e){return def}},
   set(k,v){try{localStorage.setItem('dtp26_'+k,JSON.stringify(v))}catch(e){}}
 };
-let stats = LS.get('stats',{});   // id -> {c:acertos, w:erros, last:'r'|'w', ts}
-let hist = LS.get('hist',[]);     // provas completas: {ts,data,nome,candidato,nota,acertos,tempoS,tempo,porDisc,m1,m2,aprov}
-let daily = LS.get('daily',{});   // 'AAAA-MM-DD' -> {q:respondidas, c:certas, s:segundos}
-let perfil = LS.get('perfil',{nome:'', meta:95});
-const hoje = () => { const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
-function addDaily(q,c,s){ const k=hoje(); const o=daily[k]||{q:0,c:0,s:0}; o.q+=q; o.c+=c; o.s+=Math.round(s); daily[k]=o; LS.set('daily',daily); }
-function record(q,ok,secs){const s=stats[q.id]||{c:0,w:0};ok?s.c++:s.w++;s.last=ok?'r':'w';s.ts=Date.now();stats[q.id]=s;LS.set('stats',stats);addDaily(1,ok?1:0,secs||0)}
+let stats = LS.get('stats',{});   // id -> {c:acertos, w:erros, last:'r'|'w'}
+let hist = LS.get('hist',[]);     // [{data, nome, nota, acertos, tempo, porDisc}]
+function record(q,ok){const s=stats[q.id]||{c:0,w:0};ok?s.c++:s.w++;s.last=ok?'r':'w';stats[q.id]=s;LS.set('stats',stats)}
 const errosAtuais = () => BANK.filter(q=>stats[q.id] && stats[q.id].last==='w');
 
 // ================== ESTADO ==================
@@ -1098,17 +1094,11 @@ function home(){
       <button class="btn sec" onclick="showBank()">Abrir banco comentado</button></div>
   </div>
 
-  <h2 class="sec">📈 Evolução, ranking e métricas</h2>
-  <div class="card">
-    <div class="row" style="margin-bottom:.7rem">
-      <label class="muted">Seu nome no ranking <input id="pnome" value="${(perfil.nome||'').replace(/"/g,'&quot;')}" placeholder="Candidato" style="padding:.45rem;border:1px solid var(--line);border-radius:6px;width:170px" onchange="salvarPerfil()"></label>
-      <label class="muted">Meta de nota <input id="pmeta" type="number" min="57.5" max="115" step="0.5" value="${perfil.meta}" style="width:80px" onchange="salvarPerfil()"></label>
-    </div>
-    ${kpis()}
-    ${ult.length?`<table style="margin-top:.8rem"><tr><th>Data</th><th>Prova</th><th>Acertos</th><th>Nota</th><th>Tempo</th></tr>
+  <h2 class="sec">📈 Seu histórico</h2>
+  <div class="card">${ult.length?`<table><tr><th>Data</th><th>Prova</th><th>Acertos</th><th>Nota</th><th>Tempo</th></tr>
     ${ult.map(h=>`<tr><td>${h.data}</td><td>${h.nome}</td><td class="n">${h.acertos}/70</td><td class="n"><b>${h.nota.toFixed(1)}</b></td><td>${h.tempo}</td></tr>`).join('')}</table>`
-    :'<p class="muted" style="margin-top:.6rem">Faça uma prova completa para começar sua curva de evolução e o ranking.</p>'}
-    <div class="row" style="margin-top:.8rem"><button class="btn" onclick="painel()">Abrir painel completo</button></div>
+    :'<p class="muted">Faça uma prova completa para ver sua evolução aqui (fica salvo neste navegador).</p>'}
+    ${Object.keys(stats).length?`<p class="muted" style="margin-top:.6rem">Questões já respondidas: ${Object.keys(stats).length} de 210. <button class="btn sec sm" onclick="resetStats()">Zerar estatísticas</button></p>`:''}
   </div>
 
   <h2 class="sec">🧠 Estratégia de prova (FGV)</h2>
@@ -1123,136 +1113,7 @@ function home(){
     <p style="color:inherit"><b>8. Não zere nenhuma disciplina</b> — Raciocínio Lógico (5) e Legislação (5) são as mais arriscadas por terem poucas questões.</p>
   </div>`;
 }
-function resetStats(){ if(confirm('Apagar TODAS as estatísticas, o histórico, o ranking e a atividade diária? (Faça um backup antes.)')){stats={};hist=[];daily={};LS.set('stats',stats);LS.set('hist',hist);LS.set('daily',daily);painel();} }
-function salvarPerfil(){ perfil.nome=($('#pnome')?.value||'').trim(); const m=parseFloat($('#pmeta')?.value); if(m>=57.5&&m<=115) perfil.meta=m; LS.set('perfil',perfil); }
-
-// ================== MÉTRICAS ==================
-const br = (n,d=1) => Number(n).toFixed(d).replace('.',',');
-function metricas(){
-  let tent=0,cert=0; Object.values(stats).forEach(s=>{tent+=s.c+s.w;cert+=s.c;});
-  let segs=0,qd=0; Object.values(daily).forEach(o=>{segs+=o.s;qd+=o.q;});
-  // sequência de dias seguidos estudando (conta hoje ou, se ainda não estudou hoje, a partir de ontem)
-  let streak=0; const d=new Date(); const key=x=>x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
-  if(!daily[key(d)]) d.setDate(d.getDate()-1);
-  while(daily[key(d)]&&daily[key(d)].q>0){streak++;d.setDate(d.getDate()-1);}
-  const notas=hist.map(h=>h.nota), ult3=notas.slice(-3);
-  const diasProva=Math.ceil((new Date(2026,9,11,13)-new Date())/86400000);
-  return {tent,cert,taxa:tent?cert/tent*100:0,cobert:Object.keys(stats).length,segs,tmq:qd?segs/qd:0,streak,diasEstudo:Object.keys(daily).length,
-    provas:hist.length,melhor:notas.length?Math.max(...notas):null,media3:ult3.length?ult3.reduce((a,b)=>a+b,0)/ult3.length:null,
-    aprov:hist.filter(h=>h.aprov).length,erros:errosAtuais().length,diasProva};
-}
-function tile(label,val,sub){return `<div style="background:var(--soft);border-radius:10px;padding:.7rem .8rem"><div class="muted" style="font-size:.75rem">${label}</div><div style="font-size:1.35rem;font-weight:800;color:var(--primary)">${val}</div>${sub?`<div class="muted" style="font-size:.72rem">${sub}</div>`:''}</div>`;}
-function kpis(){
-  const m=metricas(), h=Math.floor(m.segs/3600), mi=Math.round(m.segs%3600/60);
-  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.6rem">
-    ${tile('Dias até a prova',m.diasProva>0?m.diasProva:'Hoje!','11/10/2026 · 13h')}
-    ${tile('Sequência de estudo',m.streak+' dia'+(m.streak===1?'':'s'),m.diasEstudo+' dia(s) com atividade')}
-    ${tile('Questões respondidas',m.tent,m.cobert+' de 210 distintas ('+Math.round(m.cobert/210*100)+'%)')}
-    ${tile('Taxa de acerto geral',br(m.taxa)+'%',m.cert+' acertos')}
-    ${tile('Tempo estudado',h+'h '+mi+'min',m.tmq?br(m.tmq/60)+' min/questão (ideal ≤ 3)':'')}
-    ${tile('Provas completas',m.provas,m.provas?m.aprov+' aprovada(s)':'')}
-    ${tile('Melhor nota',m.melhor==null?'—':br(m.melhor),'meta: '+br(perfil.meta))}
-    ${tile('Média últimas 3',m.media3==null?'—':br(m.media3),m.erros+' questão(ões) na revisão')}
-  </div>`;
-}
-function lineChart(vals,labels){
-  const W=640,H=240,pl=38,pr=12,pt=14,pb=28, n=vals.length;
-  const x=i=>pl+(n===1?(W-pl-pr)/2:i*(W-pl-pr)/(n-1)), y=v=>pt+(1-v/115)*(H-pt-pb);
-  const ref=[[57.5,'#c53030','mínimo 57,5'],[80,'#b7791f','80'],[95,'#2f855a','95'],[perfil.meta,'#2b6cb0','meta '+br(perfil.meta)]];
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="Evolução da nota">
-    ${[0,20,40,60,80,100,115].map(v=>`<line x1="${pl}" x2="${W-pr}" y1="${y(v)}" y2="${y(v)}" stroke="#e2e8f0"/><text x="${pl-6}" y="${y(v)+4}" font-size="10" text-anchor="end" fill="#718096">${v}</text>`).join('')}
-    ${ref.map(([v,c,t])=>`<line x1="${pl}" x2="${W-pr}" y1="${y(v)}" y2="${y(v)}" stroke="${c}" stroke-dasharray="4 4" opacity=".7"/><text x="${pl+4}" y="${y(v)-3}" font-size="9.5" text-anchor="start" fill="${c}">${t}</text>`).join('')}
-    <polyline fill="none" stroke="#1a365d" stroke-width="2.5" points="${vals.map((v,i)=>x(i)+','+y(v)).join(' ')}"/>
-    ${vals.map((v,i)=>`<circle cx="${x(i)}" cy="${y(v)}" r="4.5" fill="#fff" stroke="#1a365d" stroke-width="2"><title>${labels[i]}: ${br(v)}</title></circle>
-      ${n<=12?`<text x="${x(i)}" y="${y(v)-9}" font-size="10" text-anchor="middle" fill="#1a365d" font-weight="700">${br(v)}</text>`:''}
-      <text x="${x(i)}" y="${H-10}" font-size="10" text-anchor="middle" fill="#718096">${i+1}ª</text>`).join('')}
-  </svg>`;
-}
-function barChart(days){
-  const W=640,H=150,pl=28,pb=22,pt=10, mx=Math.max(10,...days.map(d=>d.q)), bw=(W-pl-8)/days.length;
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="Questões por dia">
-    ${days.map((d,i)=>{const h=(H-pt-pb)*d.q/mx, x=pl+i*bw;return `<rect x="${x+2}" y="${H-pb-h}" width="${bw-4}" height="${h}" rx="3" fill="${d.q?'#2b6cb0':'#e2e8f0'}"><title>${d.lbl}: ${d.q} questões, ${d.c} acertos</title></rect>
-      ${d.q?`<text x="${x+bw/2}" y="${H-pb-h-3}" font-size="9" text-anchor="middle" fill="#1a365d">${d.q}</text>`:''}
-      <text x="${x+bw/2}" y="${H-7}" font-size="9" text-anchor="middle" fill="#718096">${d.lbl}</text>`}).join('')}
-  </svg>`;
-}
-function temasStats(){
-  const t={}; BANK.forEach(q=>{const s=stats[q.id]; if(!s)return; const k=q.d+'|'+q.t; const o=t[k]||(t[k]={d:q.d,t:q.t,c:0,w:0,ids:[]}); o.c+=s.c;o.w+=s.w;o.ids.push(q.id);});
-  return Object.values(t).map(o=>({...o,n:o.c+o.w,taxa:o.c/(o.c+o.w)*100}));
-}
-function treinarTema(d,t){ runPractice(shuffle(BANK.filter(q=>q.d===d&&q.t===t)),'Treino – '+t); }
-
-// ================== PAINEL: EVOLUÇÃO, RANKING E MÉTRICAS ==================
-function painel(){
-  stopTimer(); S={mode:'review',done:true};
-  header('Painel de desempenho','Evolução, ranking e métricas · salvos neste navegador (localStorage)',false);
-  const rk=ranking(), ult=hist.slice(-8);
-  // desempenho por disciplina: geral (todas as respostas) + por prova recente
-  const geral={}; ORDER.forEach(d=>geral[d]={c:0,n:0}); BANK.forEach(q=>{const s=stats[q.id]; if(s){geral[q.d].c+=s.c;geral[q.d].n+=s.c+s.w;}});
-  const dias=[]; for(let i=13;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');const o=daily[k]||{q:0,c:0};dias.push({lbl:String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0'),q:o.q,c:o.c});}
-  const ts=temasStats(), piores=ts.filter(o=>o.taxa<100).sort((a,b)=>a.taxa-b.taxa||b.n-a.n).slice(0,10), melhores=ts.filter(o=>o.n>=2).sort((a,b)=>b.taxa-a.taxa||b.n-a.n).slice(0,5);
-  const pct=(c,t)=>t?Math.round(c/t*100):null;
-  const cor=p=>p==null?'#a0aec0':p>=70?'#2f855a':p>=50?'#b7791f':'#c53030';
-  app.innerHTML=`
-  <div class="card">${kpis()}</div>
-
-  <h2 class="sec">📈 Evolução da nota (provas completas)</h2>
-  <div class="card">${hist.length?lineChart(hist.map(h=>h.nota),hist.map(h=>h.nome+' – '+h.data))+
-    `<p class="muted">Linhas tracejadas: mínimo do edital (57,5), faixas estimadas (80 e 95) e a sua meta. ${hist.length>=2?`Variação da 1ª para a última prova: <b style="color:${hist.at(-1).nota>=hist[0].nota?'#2f855a':'#c53030'}">${(hist.at(-1).nota>=hist[0].nota?'+':'')+br(hist.at(-1).nota-hist[0].nota)} pontos</b>.`:''}</p>`
-    :'<p class="muted">Ainda não há provas completas. Faça a Prova 1 para iniciar sua curva de evolução.</p>'}</div>
-
-  <h2 class="sec">📚 Evolução por disciplina (% de acerto)</h2>
-  <div class="card" style="overflow-x:auto"><table>
-    <tr><th>Disciplina</th><th>Geral<br><span style="font-weight:400">(todas as respostas)</span></th>${ult.map((h,i)=>`<th class="n">${hist.length-ult.length+i+1}ª prova</th>`).join('')}<th>Tendência</th></tr>
-    ${ORDER.map(d=>{const g=pct(geral[d].c,geral[d].n); const ps=ult.map(h=>h.porDisc?pct(h.porDisc[d][0],h.porDisc[d][1]):null).filter(v=>v!=null);
-      const tr=ps.length>=2?ps.at(-1)-ps[0]:null;
-      return `<tr><td>${DSHORT[d]}</td><td><div class="row" style="gap:.4rem;flex-wrap:nowrap"><div class="bar" style="width:90px"><i style="width:${g||0}%;background:${cor(g)}"></i></div><b style="color:${cor(g)}">${g==null?'—':g+'%'}</b></div></td>
-      ${ult.map(h=>{const p=h.porDisc?pct(h.porDisc[d][0],h.porDisc[d][1]):null;return `<td class="n" style="color:${cor(p)}">${p==null?'—':p+'%'}${h.porDisc&&h.porDisc[d][0]===0?' ⚠':''}</td>`}).join('')}
-      <td>${tr==null?'—':tr>0?`<b style="color:#2f855a">▲ ${tr} p.p.</b>`:tr<0?`<b style="color:#c53030">▼ ${-tr} p.p.</b>`:'= estável'}</td></tr>`}).join('')}
-  </table><p class="muted" style="margin-top:.5rem">⚠ = disciplina zerada naquela prova (eliminaria na prova real).</p></div>
-
-  <h2 class="sec">🏆 Ranking local</h2>
-  <div class="card" style="overflow-x:auto">${rk.length?`<table>
-    <tr><th>#</th><th>Candidato</th><th>Prova</th><th class="n">Nota</th><th class="n">Específicos</th><th class="n">Português</th><th class="n">Inglês</th><th>Situação</th><th>Data</th></tr>
-    ${rk.slice(0,20).map((h,i)=>`<tr${h===hist.at(-1)?' style="background:#ebf8ff"':''}><td><b>${i<3?['🥇','🥈','🥉'][i]:i+1+'º'}</b></td><td>${h.candidato||'Eu'}</td><td>${h.nome}</td><td class="n"><b>${br(h.nota)}</b></td>
-      <td class="n">${h.porDisc?br(h.porDisc.es[0]*2.5):'—'}</td><td class="n">${h.porDisc?h.porDisc.pt[0]:'—'}</td><td class="n">${h.porDisc?h.porDisc.en[0]:'—'}</td>
-      <td>${h.aprov===undefined?'—':h.aprov?'<span style="color:#2f855a">Aprovado</span>':'<span style="color:#c53030">Eliminado</span>'}</td><td>${h.data}</td></tr>`).join('')}
-  </table><p class="muted" style="margin-top:.5rem">Desempate igual ao do edital: maior nota em Específicos, depois Português, depois Inglês. A linha azul é a sua prova mais recente. Para disputar com colegas no mesmo navegador, troque o “nome no ranking” na tela inicial antes de cada prova.</p>`
-    :'<p class="muted">O ranking aparece após a primeira prova completa.</p>'}</div>
-
-  <h2 class="sec">🗓️ Atividade dos últimos 14 dias (questões respondidas)</h2>
-  <div class="card">${barChart(dias)}</div>
-
-  <h2 class="sec">🎯 Temas: onde focar</h2>
-  <div class="grid">
-    <div class="card"><h3>Pontos fracos (menor % de acerto)</h3>${piores.length?`<table>${piores.map(o=>`<tr><td><span class="muted">${DSHORT[o.d]}</span><br>${o.t}</td><td class="n" style="color:${cor(o.taxa)}"><b>${Math.round(o.taxa)}%</b><br><span class="muted">${o.c}/${o.n}</span></td><td><button class="btn sec sm" onclick="treinarTema('${o.d}','${o.t.replace(/'/g,"\\'")}')">Treinar</button></td></tr>`).join('')}</table>`:'<p class="muted">Responda algumas questões para identificar seus pontos fracos.</p>'}</div>
-    <div class="card"><h3>Pontos fortes</h3>${melhores.length?`<table>${melhores.map(o=>`<tr><td><span class="muted">${DSHORT[o.d]}</span><br>${o.t}</td><td class="n" style="color:${cor(o.taxa)}"><b>${Math.round(o.taxa)}%</b><br><span class="muted">${o.c}/${o.n}</span></td></tr>`).join('')}</table>`:'<p class="muted">Aparecem aqui os temas com pelo menos 2 respostas.</p>'}</div>
-  </div>
-
-  <h2 class="sec">💾 Seus dados (localStorage)</h2>
-  <div class="card"><p>Tudo fica salvo só neste navegador. Se limpar os dados do navegador ou trocar de computador/celular, exporte um backup e importe no outro lugar.</p>
-    <div class="row"><button class="btn" onclick="exportar()">Exportar backup (.json)</button>
-    <label class="btn sec" style="display:inline-block">Importar backup<input type="file" accept=".json,application/json" class="hide" onchange="importar(this)"></label>
-    <button class="btn danger" onclick="resetStats()">Zerar tudo</button></div></div>
-  <div class="row" style="justify-content:center;margin-top:1.2rem"><button class="btn" onclick="S=null;home()">Voltar ao início</button></div>`;
-  window.scrollTo(0,0);
-}
-function exportar(){
-  const blob=new Blob([JSON.stringify({app:'dataprev26',versao:1,exportado:new Date().toISOString(),stats,hist,daily,perfil},null,1)],{type:'application/json'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='backup_simulado_dataprev_'+hoje()+'.json'; document.body.appendChild(a); a.click(); a.remove();
-}
-function importar(inp){
-  const f=inp.files[0]; if(!f)return; const rd=new FileReader();
-  rd.onload=()=>{ try{ const o=JSON.parse(rd.result); if(o.app!=='dataprev26') throw 0;
-    if(!confirm('Mesclar o backup com os dados atuais? (Provas repetidas são ignoradas.)'))return;
-    Object.entries(o.stats||{}).forEach(([k,v])=>{const s=stats[k]; if(!s) stats[k]=v; else {s.c=Math.max(s.c,v.c);s.w=Math.max(s.w,v.w); if((v.ts||0)>(s.ts||0)) s.last=v.last;}});
-    const seen=new Set(hist.map(h=>h.ts)); (o.hist||[]).forEach(h=>{if(!seen.has(h.ts))hist.push(h)}); hist.sort((a,b)=>a.ts-b.ts);
-    Object.entries(o.daily||{}).forEach(([k,v])=>{const d=daily[k]; daily[k]=d?{q:Math.max(d.q,v.q),c:Math.max(d.c,v.c),s:Math.max(d.s,v.s)}:v;});
-    if(o.perfil&&!perfil.nome) perfil=o.perfil;
-    LS.set('stats',stats);LS.set('hist',hist);LS.set('daily',daily);LS.set('perfil',perfil); alert('Backup importado!'); painel();
-  }catch(e){ alert('Arquivo inválido.'); } };
-  rd.readAsText(f);
-}
+function resetStats(){ if(confirm('Apagar todas as estatísticas e o histórico?')){stats={};hist=[];LS.set('stats',stats);LS.set('hist',hist);home();} }
 
 // ================== PROVA (modo exame) ==================
 function sortearProva(){
@@ -1321,22 +1182,12 @@ function finishExam(auto){
   }
   stopTimer(); S.done=true; S.elapsed=Math.min(S.limit,(Date.now()-S.start)/1000);
   const res = corrigir(S.qs,S.ans);
-  const sq = S.elapsed/S.qs.length;
-  S.qs.forEach(q=>{ record(q, S.ans[q.id]===q.g, sq); });
-  const porDisc={}; ORDER.forEach(d=>porDisc[d]=[res.pd[d].c,res.pd[d].t]);
-  const reg={ts:Date.now(),data:new Date().toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}),nome:S.nome,candidato:perfil.nome||'Eu',
-    nota:res.nota,acertos:res.acertos,tempoS:Math.round(S.elapsed),tempo:fmt(S.elapsed),porDisc,m1:res.m1,m2:res.m2,aprov:res.aprov,brancos:S.qs.length-Object.keys(S.ans).length};
-  hist.push(reg); LS.set('hist',hist);
-  res.reg=reg;
+  S.qs.forEach(q=>{ if(S.ans[q.id]) record(q,S.ans[q.id]===q.g); else record(q,false); });
+  hist.push({data:new Date().toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}),nome:S.nome,nota:res.nota,acertos:res.acertos,tempo:fmt(S.elapsed)});
+  LS.set('hist',hist);
   S.res=res; S.filter='todas';
   renderResult();
 }
-// Ranking com os critérios de desempate do edital: nota > Específicos > Português > Inglês > data
-function rankSort(a,b){
-  const pts=(h,d)=>h.porDisc?h.porDisc[d][0]*PESO(d):0;
-  return b.nota-a.nota || pts(b,'es')-pts(a,'es') || pts(b,'pt')-pts(a,'pt') || pts(b,'en')-pts(a,'en') || (a.ts||0)-(b.ts||0);
-}
-const ranking = () => [...hist].sort(rankSort);
 function corrigir(qs,ans){
   const pd={}; ORDER.forEach(d=>pd[d]={c:0,t:0,pts:0,max:0});
   let acertos=0,nota=0; const temas={};
@@ -1372,12 +1223,6 @@ function renderResult(){
     <p style="margin-top:.6rem;color:${f.c}"><b>${f.t}</b><br><span class="muted">${f.d}</span></p>
     <p class="muted" style="margin-top:.4rem">Faixas 80/95 são estimativas: a FGV não divulga nota de corte única, pois cada perfil, localidade e cota tem sua própria classificação.</p>
   </div>
-  ${(()=>{ const rk=ranking(), pos=rk.indexOf(r.reg)+1, ant=hist[hist.length-2], dif=ant?r.nota-ant.nota:null;
-    return `<div class="grid" style="margin-top:1rem">
-      <div class="card" style="text-align:center"><div class="muted">Posição no ranking local</div><div class="big">${pos}º</div><div class="muted">de ${rk.length} prova(s) registradas</div></div>
-      <div class="card" style="text-align:center"><div class="muted">Evolução vs. prova anterior</div><div class="big" style="color:${dif==null?'#4a5568':dif>=0?'#2f855a':'#c53030'}">${dif==null?'—':(dif>=0?'+':'')+dif.toFixed(1).replace('.',',')}</div><div class="muted">${ant?'anterior: '+ant.nota.toFixed(1).replace('.',',')+' ('+ant.nome+')':'primeira prova registrada'}</div></div>
-      <div class="card" style="text-align:center"><div class="muted">Distância da sua meta</div><div class="big">${r.nota>=perfil.meta?'✔':(perfil.meta-r.nota).toFixed(1).replace('.',',')}</div><div class="muted">${r.nota>=perfil.meta?'meta de '+perfil.meta+' atingida!':'pontos para chegar a '+perfil.meta+' (≈ '+Math.ceil((perfil.meta-r.nota)/2.5)+' acertos em Específicos)'}</div></div>
-    </div><p style="text-align:center;margin-top:.6rem"><button class="btn sec sm" onclick="painel()">Ver painel completo de evolução, ranking e métricas</button></p>`; })()}
 
   <h2 class="sec">Boletim (formato do resultado oficial FGV)</h2>
   <div class="card" style="overflow-x:auto"><table>
@@ -1429,7 +1274,6 @@ function runPractice(qs,nome){
 }
 function renderTrain(){
   const q=S.qs[S.i], a=S.ans[q.id], locked=!!a, ok=a===q.g;
-  if(!locked) S.qt=Date.now();
   app.innerHTML=`
   <div class="card" style="margin-bottom:1rem"><div class="row" style="justify-content:space-between"><b>${S.i+1} de ${S.qs.length}</b><span class="muted">Acertos: ${S.ok} de ${Object.keys(S.ans).length}</span></div>
     <div class="bar" style="margin-top:.4rem"><i style="width:${(S.i+1)/S.qs.length*100}%"></i></div></div>
@@ -1443,8 +1287,7 @@ function renderTrain(){
     </div></div>`;
 }
 function answerTrain(id,l){
-  const q=S.qs[S.i]; if(S.ans[id])return; S.ans[id]=l; const ok=l===q.g; if(ok)S.ok++;
-  const secs=Math.min(600,(Date.now()-(S.qt||Date.now()))/1000); record(q,ok,secs); renderTrain();
+  const q=S.qs[S.i]; if(S.ans[id])return; S.ans[id]=l; const ok=l===q.g; if(ok)S.ok++; record(q,ok); renderTrain();
 }
 function endTrain(){
   const n=Object.keys(S.ans).length; S.done=true;
